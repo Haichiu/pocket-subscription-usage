@@ -1,0 +1,80 @@
+/* Subscription usage: a card per plan, a row per limit with a bar that colors as it fills. */
+.su {
+    max-width: 40rem;
+    display: grid;
+    gap: 1rem;
+}
+
+.su-card {
+    border: 1px solid var(--line);
+    background: var(--card);
+    padding: 0.8rem 0.9rem;
+}
+
+.su-card h3 {
+    margin: 0 0 0.4rem;
+    font-size: 0.95rem;
+    color: var(--text);
+}
+
+.su-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.3rem 0.8rem;
+    margin: 0.7rem 0;
+}
+
+.su-label {
+    color: var(--text);
+    font-size: 0.85rem;
+}
+
+.su-binding {
+    color: var(--muted);
+}
+
+.su-percent {
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.su-bar {
+    grid-column: 1 / -1;
+    height: 6px;
+    background: color-mix(in srgb, var(--muted) 22%, transparent);
+}
+
+.su-bar > span {
+    display: block;
+    height: 100%;
+    background: var(--ok);
+    transition: width 300ms ease-out;
+}
+
+.su-row.su-warning .su-bar > span {
+    background: var(--warn);
+}
+
+.su-row.su-warning .su-percent {
+    color: var(--warn);
+}
+
+.su-row.su-critical .su-bar > span {
+    background: var(--err);
+}
+
+.su-row.su-critical .su-percent {
+    color: var(--err);
+}
+
+.su-reset {
+    grid-column: 1 / -1;
+    font-size: 0.75rem;
+    color: var(--muted);
+}
+
+.su-foot {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+}
