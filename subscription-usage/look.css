@@ -1,41 +1,64 @@
 /*
- * Subscription usage: one quiet panel, a section per plan, and a row per limit with the app's 4px meter. It uses the
- * app's theme tokens for every surface, line, text, and meter, so it follows each theme's colors, light and dark, and
- * its room follows Appearance's density.
+ * Subscription usage, set like the home screen's fastfetch: a mono "usage@pi-pocket" card with key and value rows, then
+ * each plan as a titled rule with rows of small squares (the home screen's color swatches) for how full each limit is.
+ * Every color is one of the app's theme tokens, so it follows each theme, and its room follows Appearance's density.
  */
 .su {
     width: 100%;
     max-width: 40rem;
     margin-inline: auto;
     display: grid;
-    gap: calc(10px * var(--space-y));
+    gap: calc(20px * var(--space-y));
     min-width: 0;
+    padding-block: calc(8px * var(--space-y));
+    container: su / inline-size;
 }
 
 .su p {
     margin: 0;
 }
 
-/* ─── The bar on top: when it was read, and Refresh ─── */
+.su > * {
+    min-width: 0;
+}
 
-.su-toolbar {
+/* ─── The card on top: block art, the title, and what the page says at a glance ─── */
+
+.su-fetch {
+    display: flex;
+    align-items: center;
+    gap: calc(28px * var(--space-x));
+}
+
+.su-glyph {
+    flex: none;
+    margin: 0;
+    font: 13px / 1.15 var(--mono);
+    color: var(--brand);
+    user-select: none;
+    animation: popin 0.6s var(--ease-out) backwards;
+}
+
+.su-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.su-title {
     display: flex;
     align-items: center;
     gap: 10px;
-    min-height: 32px;
-    min-width: 0;
+    margin-bottom: 6px;
+    font: 600 15px / 1.3 var(--mono);
+    color: var(--text);
+    animation: rise-in 0.42s var(--ease-out) 0.12s backwards;
 }
 
-.su-updated {
-    min-width: 0;
-    color: var(--muted);
-    font-size: 12px;
-    line-height: 1.4;
-}
-
-.su-updated time {
-    color: var(--body);
-    font-variant-numeric: tabular-nums;
+.su-title b {
+    color: var(--accent);
 }
 
 /* Wide enough for "Refreshing…", so it does not grow each minute. */
@@ -43,6 +66,10 @@
     flex: none;
     margin-inline-start: auto;
     min-width: 8rem;
+    font-family: var(--sans);
+    font-size: 12.5px;
+    font-weight: 500;
+    line-height: 1.4;
 }
 
 .su-refresh[aria-disabled="true"] {
@@ -54,53 +81,116 @@
     display: inline-flex;
 }
 
-/* ─── The panel: a section per plan, hairlines between the rows ─── */
-
-.su-board {
-    min-width: 0;
-    overflow: hidden;
-    border: 1px solid var(--hair);
-    border-radius: var(--r-card);
-    background: var(--card);
+.su-rows {
+    margin: 0;
 }
+
+.su-row {
+    display: grid;
+    grid-template-columns: 5.25rem minmax(0, 1fr);
+    gap: 12px;
+    font-size: 13.5px;
+    line-height: 1.75;
+    animation: rise-in 0.42s var(--ease-out) backwards;
+    animation-delay: calc(var(--i, 0) * 45ms + 120ms);
+}
+
+.su-row dt {
+    color: var(--muted);
+}
+
+.su-row dd {
+    margin: 0;
+    min-width: 0;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+}
+
+.su-row dd b {
+    font: 600 13px var(--mono);
+}
+
+.su-quiet {
+    color: var(--muted);
+}
+
+/* What the colors mean, as swatches like the home screen's. */
+.su-key {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 12px;
+    animation: rise-in 0.42s var(--ease-out) backwards;
+    animation-delay: calc(var(--i, 0) * 45ms + 120ms);
+}
+
+.su-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: var(--r-tag);
+    background: var(--ok);
+}
+
+.su-swatch + .su-swatch,
+.su-key .su-swatch:not(:first-child) {
+    margin-inline-start: 10px;
+}
+
+.su-swatch.su-warning {
+    background: var(--warn);
+}
+
+.su-swatch.su-critical {
+    background: var(--err);
+}
+
+/* ─── A plan: a titled rule, and its limits ─── */
 
 .su-plan {
     min-width: 0;
-}
-
-.su-plan + .su-plan {
-    border-top: 1px solid var(--line);
+    animation: rise-in 0.42s var(--ease-out) backwards;
+    animation-delay: calc(var(--i, 0) * 45ms + 120ms);
 }
 
 .su-plan-head {
     display: flex;
-    align-items: baseline;
-    gap: 12px;
+    align-items: center;
+    gap: 10px;
     min-width: 0;
-    padding: calc(9px * var(--space-y)) calc(14px * var(--space-x)) calc(5px * var(--space-y));
+    margin-bottom: calc(4px * var(--space-y));
 }
 
 .su-plan-head h3 {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     min-width: 0;
     margin: 0;
-    color: var(--muted);
-    font-size: 12.5px;
-    font-weight: 600;
-    line-height: 1.45;
+    color: var(--text);
+    font: 600 13.5px / 1.4 var(--mono);
     overflow-wrap: anywhere;
+}
+
+/* The rule that runs from the plan's name to its count. */
+.su-rule {
+    flex: 1 1 1.5rem;
+    min-width: 1rem;
+    height: 1px;
+    background: var(--hair);
 }
 
 .su-plan-head .su-flag,
 .su-count {
     flex: none;
     color: var(--muted);
-    font-size: 11.5px;
+    font-size: 12px;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
 }
 
-/* ─── A limit: its name and how full, the meter, and when it resets ─── */
+/* ─── A limit: its name, a gauge of squares, how full, and when it resets ─── */
 
 .su-limits {
     margin: 0;
@@ -109,37 +199,75 @@
 }
 
 .su-limit {
-    min-width: 0;
-    padding: calc(7px * var(--space-y)) calc(14px * var(--space-x)) calc(9px * var(--space-y));
-}
-
-.su-limit + .su-limit {
-    border-top: 1px solid var(--hair);
-}
-
-.su-line {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(6.5rem, 9rem) minmax(0, 1fr) 3rem;
+    grid-template-areas:
+        "label gauge value"
+        ". meta meta";
+    align-items: center;
+    column-gap: 12px;
+    padding-block: calc(6px * var(--space-y));
 }
 
 .su-label {
-    flex: 1 1 auto;
-    min-width: 0;
-    color: var(--text);
+    grid-area: label;
+    color: var(--muted);
     font-size: 13.5px;
     line-height: 1.4;
     overflow-wrap: anywhere;
 }
 
-/* A level that needs a look: a word in the text color, with a dot in the level's color. Color is not the only sign. */
+.su-gauge {
+    grid-area: gauge;
+    display: flex;
+    gap: 2px;
+    min-width: 0;
+}
+
+/* Each square is 5%: the swatch's shape, dim until lit, then the level's color. */
+.su-cell {
+    flex: 1 1 0;
+    min-width: 0;
+    height: 14px;
+    border-radius: calc(var(--r-tag) / 2.5);
+    background: var(--hair-2);
+}
+
+.su-cell.su-on {
+    background: var(--su-tone, var(--ok));
+    animation: popin var(--t-in) var(--ease-out) backwards;
+    animation-delay: calc(var(--c) * 14ms + 150ms);
+}
+
+.su-limit.su-warning {
+    --su-tone: var(--warn);
+}
+
+.su-limit.su-critical {
+    --su-tone: var(--err);
+}
+
+.su-value {
+    grid-area: value;
+    text-align: end;
+    color: var(--text);
+    font: 600 13.5px / 1.4 var(--mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.su-unit {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 500;
+}
+
+/* A level that needs a look: a word in the text color, with a square in the level's color. Color is not the only sign. */
 .su-flag {
     display: inline-flex;
     align-items: center;
     gap: 5px;
     color: var(--text);
-    font-size: 11.5px;
+    font-size: 12px;
     font-weight: 500;
     line-height: 1.4;
     white-space: nowrap;
@@ -147,9 +275,9 @@
 
 .su-flag::before {
     content: "";
-    width: 6px;
-    height: 6px;
-    border-radius: var(--r-pill);
+    width: 7px;
+    height: 7px;
+    border-radius: 2px;
     background: var(--su-tone, var(--muted));
 }
 
@@ -162,64 +290,14 @@
     --su-tone: var(--err);
 }
 
-.su-value {
-    flex: none;
-    padding-top: 1px;
-    color: var(--text);
-    font: 600 13px / 1.4 var(--mono);
-    font-variant-numeric: tabular-nums;
-}
-
-.su-unit {
-    color: var(--muted);
-    font-size: 11px;
-    font-weight: 500;
-}
-
-/* The app's meter: 4px, and the accent until a limit needs a look. */
-.su-meter {
-    display: block;
-    height: 4px;
-    margin-top: calc(5px * var(--space-y));
-    overflow: hidden;
-    border-radius: calc(var(--r-mark) - 1px);
-    background: var(--hair-2);
-}
-
-.su-fill {
-    display: block;
-    width: var(--su-p);
-    height: 100%;
-    border-radius: inherit;
-    background: var(--accent);
-    transition:
-        width var(--t-in) var(--ease-out),
-        background-color var(--t-hover) var(--ease-out);
-    animation: su-fill var(--t-in) var(--ease-out);
-}
-
-.su-limit.su-warning .su-fill {
-    background: var(--warn);
-}
-
-.su-limit.su-critical .su-fill {
-    background: var(--err);
-}
-
-/* The meter grows from empty when the page opens (at once with reduced motion: the app shortens it). */
-@keyframes su-fill {
-    from {
-        width: 0;
-    }
-}
-
 .su-meta {
+    grid-area: meta;
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
     column-gap: 5px;
     row-gap: 1px;
-    margin-top: calc(4px * var(--space-y));
+    margin-top: calc(3px * var(--space-y));
     color: var(--muted);
     font-size: 12px;
     line-height: 1.4;
@@ -244,7 +322,7 @@
 /* ─── Notes, an empty plan, and a plan that could not be read ─── */
 
 .su-notes {
-    padding: 0 calc(14px * var(--space-x)) calc(9px * var(--space-y));
+    margin-top: calc(2px * var(--space-y));
 }
 
 .su-notes p {
@@ -259,7 +337,6 @@
 }
 
 .su-empty {
-    padding: calc(6px * var(--space-y)) calc(14px * var(--space-x)) calc(10px * var(--space-y));
     color: var(--muted);
     font-size: 12.5px;
     line-height: 1.45;
@@ -269,7 +346,6 @@
     display: flex;
     align-items: flex-start;
     gap: 8px;
-    padding: 0 calc(14px * var(--space-x)) calc(10px * var(--space-y));
     color: var(--body);
     font-size: 12.5px;
     line-height: 1.45;
@@ -347,13 +423,14 @@
     border: 0;
 }
 
-/* High contrast (forced colors): the app's colors give way, so the meter keeps a frame and a system fill. */
+/* High contrast (forced colors): the app's colors give way, so the squares keep a frame and a lit one a system fill. */
 @media (forced-colors: active) {
-    .su-meter {
+    .su-cell {
         border: 1px solid CanvasText;
     }
 
-    .su .su-limit .su-fill {
+    .su .su-cell.su-on,
+    .su .su-swatch {
         forced-color-adjust: none;
         background: Highlight;
     }
@@ -364,16 +441,39 @@
     }
 }
 
-/* Phones: a little less room at the sides, so a label and its percent keep a line. */
-@media (max-width: 420px) {
-    .su-plan-head,
-    .su-limit {
-        padding-inline: calc(12px * var(--space-x));
+/* Reduced motion: nothing rises or pops in here. */
+@media (prefers-reduced-motion: reduce) {
+    .su-glyph,
+    .su-title,
+    .su-row,
+    .su-key,
+    .su-plan,
+    .su-cell.su-on {
+        animation: none;
+    }
+}
+
+/* A narrow page (a phone, or a small tile): no block art, and a limit's name sits over its gauge. */
+@container su (max-width: 34rem) {
+    .su-glyph {
+        display: none;
     }
 
-    .su-notes,
-    .su-empty,
-    .su-problem {
-        padding-inline: calc(12px * var(--space-x));
+    .su-limit {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+            "label value"
+            "gauge gauge"
+            "meta meta";
+        row-gap: calc(4px * var(--space-y));
+    }
+
+    .su-label {
+        color: var(--text);
+    }
+
+    .su-row {
+        grid-template-columns: 4.5rem minmax(0, 1fr);
+        gap: 10px;
     }
 }

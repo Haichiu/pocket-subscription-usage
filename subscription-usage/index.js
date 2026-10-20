@@ -1,5 +1,6 @@
 // Subscription usage's browser module: a rail button (with the fullest limit on it once one passes 80%), a launcher
-// action, and a page that lists each plan's limits, how full each is, and when it resets. The server module asks the
+// action, and a page set like the home screen's fastfetch: a "usage@pi-pocket" card, then each plan's limits as rows of
+// small squares (the home screen's color swatches) with how full each is and when it resets. The server module asks the
 // services; this only shows what it says.
 
 export const pocketApi = 1;
@@ -15,6 +16,18 @@ const BADGE_EVERY_MS = 5 * 60_000;
 const NEAR_MS = 6 * 86_400_000;
 /** The words for a level that needs a look, shown in the limit's line of details. An "ok" level has none. */
 const LEVEL_WORDS = { warning: "Warning", critical: "Critical" };
+/** The squares in a gauge: each is 5% of a limit. */
+const CELLS = 20;
+/** Block art for the top of the page, drawn like the home screen's π: three bars of rising height. */
+const GLYPH = [
+    "              ▗██▖",
+    "              ▐██▌",
+    "       ▗██▖   ▐██▌",
+    "       ▐██▌   ▐██▌",
+    "▗██▖   ▐██▌   ▐██▌",
+    "▐██▌   ▐██▌   ▐██▌",
+    "▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+].join("\n");
 /** What "In force" on a limit means. */
 const IN_FORCE = "The limit that holds you back now";
 
@@ -54,6 +67,40 @@ const fullest = (data) =>
         ),
     );
 
+/** How many of a gauge's squares are lit: at least one for any use, and not all of them until a limit is full. */
+function lit(percent) {
+    if (percent <= 0) {
+        return 0;
+    }
+
+    const n = Math.max(1, Math.round(percent / (100 / CELLS)));
+
+    return percent < 100 ? Math.min(n, CELLS - 1) : CELLS;
+}
+
+/** What the card at the top says: the fullest limit, and the next reset, across the plans that answered. */
+function glance(data) {
+    let top = null;
+    let next = null;
+
+    for (const report of data?.reports ?? []) {
+        for (const each of report.ok ? report.limits : []) {
+            const percent = Number(each.percent) || 0;
+            const reset = Date.parse(each.resetsAt ?? "");
+
+            if (!top || percent > top.percent) {
+                top = { percent, label: each.label, plan: report.name };
+            }
+
+            if (Number.isFinite(reset) && reset > Date.now() && (!next || reset < next.time)) {
+                next = { time: reset, label: each.label, plan: report.name };
+            }
+        }
+    }
+
+    return { top, next };
+}
+
 export default function setup(pocket) {
     const { html, useEffect, useState, Icon, Loader, Spinner } = pocket;
 
@@ -63,20 +110,25 @@ export default function setup(pocket) {
         const reset = Date.parse(limit.resetsAt ?? "");
         const percent = Number(limit.percent) || 0;
         const word = LEVEL_WORDS[limit.level];
-        const fill = { "--su-p": `${Math.min(100, Math.max(0, percent))}%` };
+        const on = lit(percent);
         const timed = Number.isFinite(reset);
 
         return html`<li class=${`su-limit su-${limit.level}`}>
-            <div class="su-line">
-                <span class="su-label">${limit.label}</span>
-                <span class="su-value"
-                    >${Math.round(percent)}<span class="su-unit">%</span
-                    ><span class="su-sr"> used</span></span
-                >
-            </div>
-            <span class="su-meter" aria-hidden="true">
-                <span class="su-fill" style=${fill}></span>
+            <span class="su-label">${limit.label}</span>
+            <span class="su-gauge" aria-hidden="true">
+                ${Array.from(
+                    { length: CELLS },
+                    (_, at) =>
+                        html`<span
+                            class=${at < on ? "su-cell su-on" : "su-cell"}
+                            style=${`--c:${at}`}
+                        ></span>`,
+                )}
             </span>
+            <span class="su-value"
+                >${Math.round(percent)}<span class="su-unit">%</span
+                ><span class="su-sr"> used</span></span
+            >
             ${
                 (word || limit.binding || timed) &&
                 html`<p class="su-meta">
@@ -107,13 +159,14 @@ export default function setup(pocket) {
     }
 
     /** A plan's section: its limits and notes, or why it could not be read. */
-    function Plan({ report }) {
+    function Plan({ report, index }) {
         const head = `su-plan-${report.id}`;
         const notes = report.ok ? (report.notes ?? []) : [];
 
-        return html`<section class="su-plan" aria-labelledby=${head}>
+        return html`<section class="su-plan" aria-labelledby=${head} style=${`--i:${index}`}>
             <header class="su-plan-head">
                 <h3 id=${head}>${report.name}</h3>
+                <span class="su-rule" aria-hidden="true"></span>
                 ${
                     report.ok
                         ? report.limits.length > 0 &&
@@ -130,8 +183,8 @@ export default function setup(pocket) {
                               ? html`<p class="su-empty">No limits reported.</p>`
                               : html`<ul class="su-limits" role="list">
                                     ${report.limits.map(
-                                        (limit, index) =>
-                                            html`<${LimitRow} key=${index} limit=${limit} />`,
+                                        (limit, at) =>
+                                            html`<${LimitRow} key=${at} limit=${limit} />`,
                                     )}
                                 </ul>`
                       }
@@ -219,22 +272,66 @@ export default function setup(pocket) {
         const read = new Date(data.at);
         const stamp = read.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
         const iso = Number.isFinite(read.getTime()) ? read.toISOString() : undefined;
+        const { top, next } = glance(data);
 
         return html`<div class="su" aria-busy=${busy ? "true" : undefined}>
-            <div class="su-toolbar">
-                <p class="su-updated">Updated <time datetime=${iso}>${stamp}</time></p>
-                <button
-                    class="button small su-refresh"
-                    aria-disabled=${busy ? "true" : "false"}
-                    onClick=${() => !busy && load(true)}
-                >
+            <div class="su-fetch">
+                <pre class="su-glyph" aria-hidden="true">${GLYPH}</pre>
+                <div class="su-info">
+                    <div class="su-title">
+                        <span class="su-host"><b>usage</b>@pi-pocket</span>
+                        <button
+                            class="button small su-refresh"
+                            aria-disabled=${busy ? "true" : "false"}
+                            onClick=${() => !busy && load(true)}
+                        >
+                            ${
+                                busy
+                                    ? html`<span class="su-spin" aria-hidden="true"
+                                          ><${Spinner}
+                                      /></span>`
+                                    : html`<${Icon} name="reload" size=${14} />`
+                            }
+                            ${busy ? "Refreshing…" : "Refresh"}
+                        </button>
+                    </div>
+                    <dl class="su-rows">
+                        <div class="su-row" style="--i:1">
+                            <dt>read</dt>
+                            <dd><time datetime=${iso}>${stamp}</time></dd>
+                        </div>
+                        ${
+                            top &&
+                            html`<div class="su-row" style="--i:2">
+                                <dt>fullest</dt>
+                                <dd>
+                                    <b>${Math.round(top.percent)}%</b>
+                                    <span class="su-quiet">${" "}· ${top.label}, ${top.plan}</span>
+                                </dd>
+                            </div>`
+                        }
+                        ${
+                            next &&
+                            html`<div class="su-row" style="--i:3">
+                                <dt>resets</dt>
+                                <dd>
+                                    <b>${untilThen(next.time)}</b>
+                                    <span class="su-quiet"
+                                        >${" "}· ${next.label}, ${next.plan}</span
+                                    >
+                                </dd>
+                            </div>`
+                        }
+                    </dl>
                     ${
-                        busy
-                            ? html`<span class="su-spin" aria-hidden="true"><${Spinner} /></span>`
-                            : html`<${Icon} name="reload" size=${14} />`
+                        top &&
+                        html`<div class="su-key" style="--i:4" aria-hidden="true">
+                            <span class="su-swatch"></span>ok
+                            <span class="su-swatch su-warning"></span>warning
+                            <span class="su-swatch su-critical"></span>critical
+                        </div>`
                     }
-                    ${busy ? "Refreshing…" : "Refresh"}
-                </button>
+                </div>
             </div>
             ${
                 error &&
@@ -242,12 +339,11 @@ export default function setup(pocket) {
             }
             ${
                 data.reports.length === 0
-                    ? html`<div class="su-board"><p class="su-empty">No plans reported.</p></div>`
-                    : html`<div class="su-board">
-                          ${data.reports.map(
-                              (report) => html`<${Plan} key=${report.id} report=${report} />`,
-                          )}
-                      </div>`
+                    ? html`<p class="su-empty">No plans reported.</p>`
+                    : data.reports.map(
+                          (report, at) =>
+                              html`<${Plan} key=${report.id} report=${report} index=${at + 2} />`,
+                      )
             }
         </div>`;
     }
