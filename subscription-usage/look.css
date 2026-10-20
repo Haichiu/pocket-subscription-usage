@@ -1,80 +1,379 @@
-/* Subscription usage: a card per plan, a row per limit with a bar that colors as it fills. */
+/*
+ * Subscription usage: one quiet panel, a section per plan, and a row per limit with the app's 4px meter. It uses the
+ * app's theme tokens for every surface, line, text, and meter, so it follows each theme's colors, light and dark, and
+ * its room follows Appearance's density.
+ */
 .su {
+    width: 100%;
     max-width: 40rem;
+    margin-inline: auto;
     display: grid;
-    gap: 1rem;
+    gap: calc(10px * var(--space-y));
+    min-width: 0;
 }
 
-.su-card {
-    border: 1px solid var(--line);
-    background: var(--card);
-    padding: 0.8rem 0.9rem;
+.su p {
+    margin: 0;
 }
 
-.su-card h3 {
-    margin: 0 0 0.4rem;
-    font-size: 0.95rem;
-    color: var(--text);
+/* ─── The bar on top: when it was read, and Refresh ─── */
+
+.su-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 32px;
+    min-width: 0;
 }
 
-.su-row {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 0.3rem 0.8rem;
-    margin: 0.7rem 0;
-}
-
-.su-label {
-    color: var(--text);
-    font-size: 0.85rem;
-}
-
-.su-binding {
+.su-updated {
+    min-width: 0;
     color: var(--muted);
+    font-size: 12px;
+    line-height: 1.4;
 }
 
-.su-percent {
-    font-size: 0.85rem;
+.su-updated time {
+    color: var(--body);
     font-variant-numeric: tabular-nums;
 }
 
-.su-bar {
-    grid-column: 1 / -1;
+/* Wide enough for "Refreshing…", so it does not grow each minute. */
+.su-refresh {
+    flex: none;
+    margin-inline-start: auto;
+    min-width: 8rem;
+}
+
+.su-refresh[aria-disabled="true"] {
+    opacity: 0.6;
+    cursor: progress;
+}
+
+.su-spin {
+    display: inline-flex;
+}
+
+/* ─── The panel: a section per plan, hairlines between the rows ─── */
+
+.su-board {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    background: var(--card);
+}
+
+.su-plan {
+    min-width: 0;
+}
+
+.su-plan + .su-plan {
+    border-top: 1px solid var(--line);
+}
+
+.su-plan-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    min-width: 0;
+    padding: calc(9px * var(--space-y)) calc(14px * var(--space-x)) calc(5px * var(--space-y));
+}
+
+.su-plan-head h3 {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    color: var(--muted);
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.su-plan-head .su-flag,
+.su-count {
+    flex: none;
+    color: var(--muted);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* ─── A limit: its name and how full, the meter, and when it resets ─── */
+
+.su-limits {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.su-limit {
+    min-width: 0;
+    padding: calc(7px * var(--space-y)) calc(14px * var(--space-x)) calc(9px * var(--space-y));
+}
+
+.su-limit + .su-limit {
+    border-top: 1px solid var(--hair);
+}
+
+.su-line {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    min-width: 0;
+}
+
+.su-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--text);
+    font-size: 13.5px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+/* A level that needs a look: a word in the text color, with a dot in the level's color. Color is not the only sign. */
+.su-flag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--text);
+    font-size: 11.5px;
+    font-weight: 500;
+    line-height: 1.4;
+    white-space: nowrap;
+}
+
+.su-flag::before {
+    content: "";
+    width: 6px;
     height: 6px;
-    background: color-mix(in srgb, var(--muted) 22%, transparent);
+    border-radius: var(--r-pill);
+    background: var(--su-tone, var(--muted));
 }
 
-.su-bar > span {
+.su-flag.su-warning {
+    --su-tone: var(--warn);
+}
+
+.su-flag.su-critical,
+.su-flag.su-failed {
+    --su-tone: var(--err);
+}
+
+.su-value {
+    flex: none;
+    padding-top: 1px;
+    color: var(--text);
+    font: 600 13px / 1.4 var(--mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.su-unit {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 500;
+}
+
+/* The app's meter: 4px, and the accent until a limit needs a look. */
+.su-meter {
     display: block;
-    height: 100%;
-    background: var(--ok);
-    transition: width 300ms ease-out;
+    height: 4px;
+    margin-top: calc(5px * var(--space-y));
+    overflow: hidden;
+    border-radius: calc(var(--r-mark) - 1px);
+    background: var(--hair-2);
 }
 
-.su-row.su-warning .su-bar > span {
+.su-fill {
+    display: block;
+    width: var(--su-p);
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent);
+    transition:
+        width var(--t-in) var(--ease-out),
+        background-color var(--t-hover) var(--ease-out);
+    animation: su-fill var(--t-in) var(--ease-out);
+}
+
+.su-limit.su-warning .su-fill {
     background: var(--warn);
 }
 
-.su-row.su-warning .su-percent {
-    color: var(--warn);
-}
-
-.su-row.su-critical .su-bar > span {
+.su-limit.su-critical .su-fill {
     background: var(--err);
 }
 
-.su-row.su-critical .su-percent {
+/* The meter grows from empty when the page opens (at once with reduced motion: the app shortens it). */
+@keyframes su-fill {
+    from {
+        width: 0;
+    }
+}
+
+.su-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 5px;
+    row-gap: 1px;
+    margin-top: calc(4px * var(--space-y));
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.4;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+}
+
+.su-meta strong {
+    color: var(--body);
+    font-weight: 500;
+}
+
+.su-sep {
+    color: var(--faint);
+}
+
+.su-binding {
+    color: var(--body);
+    font-weight: 500;
+}
+
+/* ─── Notes, an empty plan, and a plan that could not be read ─── */
+
+.su-notes {
+    padding: 0 calc(14px * var(--space-x)) calc(9px * var(--space-y));
+}
+
+.su-notes p {
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.su-notes p + p {
+    margin-top: 2px;
+}
+
+.su-empty {
+    padding: calc(6px * var(--space-y)) calc(14px * var(--space-x)) calc(10px * var(--space-y));
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.45;
+}
+
+.su-problem {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 0 calc(14px * var(--space-x)) calc(10px * var(--space-y));
+    color: var(--body);
+    font-size: 12.5px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.su-problem .icon {
+    flex: none;
+    margin-top: 2px;
     color: var(--err);
 }
 
-.su-reset {
-    grid-column: 1 / -1;
-    font-size: 0.75rem;
-    color: var(--muted);
+.su-problem > span {
+    min-width: 0;
 }
 
-.su-foot {
+/* ─── Nothing read: what went wrong, and Try again ─── */
+
+.su-state {
     display: flex;
-    align-items: center;
-    gap: 0.8rem;
+    align-items: flex-start;
+    gap: 10px;
+    min-width: 0;
+    padding: calc(12px * var(--space-y)) calc(14px * var(--space-x));
+    border: 1px solid var(--err-line);
+    border-radius: var(--r-card);
+    background: var(--err-soft);
+}
+
+.su-state > .icon {
+    flex: none;
+    margin-top: 2px;
+    color: var(--err);
+}
+
+.su-state-text {
+    min-width: 0;
+}
+
+.su-state-title {
+    color: var(--text);
+    font-size: 13.5px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.su-state-detail {
+    margin-top: 2px;
+    color: var(--body);
+    font-size: 12.5px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.su-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.su-actions .button[aria-disabled="true"] {
+    opacity: 0.6;
+    cursor: progress;
+}
+
+/* For screen readers only. */
+.su-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* High contrast (forced colors): the app's colors give way, so the meter keeps a frame and a system fill. */
+@media (forced-colors: active) {
+    .su-meter {
+        border: 1px solid CanvasText;
+    }
+
+    .su .su-limit .su-fill {
+        forced-color-adjust: none;
+        background: Highlight;
+    }
+
+    .su .su-flag::before {
+        forced-color-adjust: none;
+        background: CanvasText;
+    }
+}
+
+/* Phones: a little less room at the sides, so a label and its percent keep a line. */
+@media (max-width: 420px) {
+    .su-plan-head,
+    .su-limit {
+        padding-inline: calc(12px * var(--space-x));
+    }
+
+    .su-notes,
+    .su-empty,
+    .su-problem {
+        padding-inline: calc(12px * var(--space-x));
+    }
 }
