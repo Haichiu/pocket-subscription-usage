@@ -265,7 +265,7 @@ export default function setup(pocket) {
 
         if (!data) {
             return html`<div class="su" aria-busy="true">
-                <${Loader} label="Asking Claude, ChatGPT, and OpenCode Go" />
+                <${Loader} label="Asking your plans" />
             </div>`;
         }
 
@@ -366,7 +366,7 @@ export default function setup(pocket) {
     pocket.launcher({
         id: "usage",
         label: "Subscription usage",
-        detail: "Claude, ChatGPT, and OpenCode Go limits",
+        detail: "Claude, ChatGPT, OpenCode Go, Grok, and Z.ai limits",
         iconPath: BARS,
         keywords: [
             "anthropic",
@@ -375,6 +375,10 @@ export default function setup(pocket) {
             "chatgpt",
             "codex",
             "opencode",
+            "grok",
+            "xai",
+            "zai",
+            "glm",
             "quota",
             "limits",
             "usage",
