@@ -872,7 +872,10 @@ export default function createSubscriptionUsage(_host: unknown, web: ExtensionWe
                 zai(signal),
                 miniMax(signal),
             ])
-        ).filter((report): report is Report => report !== undefined);
+        )
+            .filter((report): report is Report => report !== undefined)
+            // The plans that answered first, each group in its own order: what failed goes to the end.
+            .sort((a, b) => Number(b.ok) - Number(a.ok));
 
         last = { at: Date.now(), reports };
 
