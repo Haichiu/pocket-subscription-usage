@@ -1,6 +1,6 @@
 /**
- * Subscription usage: a page on the rail with how much of your Claude, ChatGPT (Codex), OpenCode Go, Grok, and Z.ai
- * plans is used, and when each limit resets. The server asks each service with the sign-ins already on this machine, so
+ * Subscription usage: a page on the rail with how much of your Claude, ChatGPT (Codex), OpenCode Go, Grok, Z.ai, and
+ * MiniMax plans is used, and when each limit resets. The server asks each service with the sign-ins already on this machine, so
  * no key or token reaches the browser.
  */
 import { type ChildProcess, spawn } from "node:child_process";
@@ -41,6 +41,8 @@ const GROK_SETTINGS = "https://cli-chat-proxy.grok.com/v1/settings";
 /** Z.ai's quota and subscriptions, as its own subscription page reads them. */
 const ZAI_QUOTA = "https://api.z.ai/api/monitor/usage/quota/limit";
 const ZAI_PLANS = "https://api.z.ai/api/biz/subscription/list";
+/** MiniMax's Coding Plan lanes, as its own Coding Plan page reads them. */
+const MINIMAX_REMAINS = "https://api.minimax.io/v1/api/openplatform/coding_plan/remains";
 /** Z.ai's units for a window's length, in minutes (5 is a month, named on its own). */
 const ZAI_UNIT_MINUTES: Record<number, number> = { 3: 60, 4: 1440, 6: 10_080 };
 
@@ -158,6 +160,9 @@ function zaiWindow(unit: unknown, number: unknown): string | undefined {
 
 /** "GrokBuild" as "Grok Build". */
 const spaced = (name: string) => name.replace(/([a-z])([A-Z])/g, "$1 $2");
+
+/** "video" as "Video". */
+const capitalized = (name: string) => `${name.charAt(0).toUpperCase()}${name.slice(1)}`;
 
 /**
  * Ask Codex's own app server (`codex app-server`, JSON-RPC over stdio) for the account's limits. Codex reads and
@@ -734,6 +739,127 @@ export default function createSubscriptionUsage(_host: unknown, web: ExtensionWe
         }
     }
 
+    /**
+     * MiniMax's Coding Plan, from Pi's MiniMax key: text ("general") and each other lane, in its short window and its
+     * week. A standard key (`sk-api-`) pays as it goes, and has no plan: then, and without a key, the page leaves
+     * MiniMax out.
+     */
+    async function miniMax(signal: AbortSignal): Promise<Report | undefined> {
+        const name = "MiniMax (Coding Plan)";
+
+        try {
+            const found = await signIn("minimax", signal);
+
+            if (found === undefined || found.key.startsWith("sk-api-")) {
+                return undefined;
+            }
+
+            const response = await fetch(MINIMAX_REMAINS, {
+                headers: { authorization: `Bearer ${found.key}`, accept: "application/json" },
+                redirect: "error",
+                signal,
+            });
+
+            if (!response.ok) {
+                throw answered(response.status);
+            }
+
+            const body = (await response.json()) as Record<string, any>;
+            const code = body.base_resp?.status_code;
+
+            if (code !== 0) {
+                throw new Said(
+                    code === 1004
+                        ? "It refused the key: sign in again in Menu → Providers."
+                        : `It refused to read the plan (code ${Number(code) || "unknown"}).`,
+                );
+            }
+
+            const lanes = (Array.isArray(body.model_remains) ? body.model_remains : []).filter(
+                (each: unknown): each is Record<string, any> =>
+                    each !== null && typeof each === "object",
+            );
+            const limits: Limit[] = [];
+            const others: Limit[] = [];
+            const notes = ["From Pi's MiniMax key."];
+
+            for (const lane of lanes) {
+                const text = lane.model_name === "general";
+                const prefix = text ? "" : `${capitalized(String(lane.model_name ?? "other"))}, `;
+
+                for (const window of [
+                    {
+                        start: lane.start_time,
+                        end: lane.end_time,
+                        total: lane.current_interval_total_count,
+                        remaining: lane.current_interval_usage_count,
+                        left: lane.current_interval_remaining_percent,
+                        status: lane.current_interval_status,
+                    },
+                    {
+                        start: lane.weekly_start_time,
+                        end: lane.weekly_end_time,
+                        total: lane.current_weekly_total_count,
+                        remaining: lane.current_weekly_usage_count,
+                        left: lane.current_weekly_remaining_percent,
+                        status: lane.current_weekly_status,
+                    },
+                ]) {
+                    const minutes = Math.round(
+                        (Number(window.end) - Number(window.start)) / 60_000,
+                    );
+
+                    if (!(minutes > 0)) {
+                        continue;
+                    }
+
+                    const label = windowLabel(minutes);
+
+                    // Status 3 with nothing in it: a lane the plan leaves out, or (for text in a week) no limit at all.
+                    if (
+                        window.status === 3 &&
+                        !(Number(window.total) > 0) &&
+                        Number(window.left) >= 100
+                    ) {
+                        if (text && label === "Week") {
+                            notes.push("Text has no weekly limit.");
+                        }
+
+                        continue;
+                    }
+
+                    // `usage_count` holds what is left, not what is used: the percent left is the surer field.
+                    const used =
+                        typeof window.left === "number"
+                            ? 100 - window.left
+                            : Number(window.total) > 0
+                              ? ((Number(window.total) - Number(window.remaining)) /
+                                    Number(window.total)) *
+                                100
+                              : undefined;
+
+                    if (used === undefined || !Number.isFinite(used)) {
+                        continue;
+                    }
+
+                    const percent = Math.min(100, percentOf(used));
+
+                    (text ? limits : others).push({
+                        label: prefix + label,
+                        percent,
+                        ...resetOfMs(Number(window.end)),
+                        level: levelOf(percent),
+                    });
+                }
+            }
+
+            // Text first: it is what the work runs on.
+            return { id: "minimax", name, ok: true, limits: [...limits, ...others], notes };
+        } catch (error) {
+            return { id: "minimax", name, ok: false, error: failed(error) };
+        }
+    }
+
     /** Every service at once, each on its own: one that fails leaves the others' answers. */
     const read = async () => {
         const signal = AbortSignal.any([AbortSignal.timeout(TIMEOUT_MS), alive.signal]);
@@ -744,6 +870,7 @@ export default function createSubscriptionUsage(_host: unknown, web: ExtensionWe
                 openCodeGo(signal),
                 grok(signal),
                 zai(signal),
+                miniMax(signal),
             ])
         ).filter((report): report is Report => report !== undefined);
 

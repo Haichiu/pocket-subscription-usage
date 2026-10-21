@@ -366,7 +366,7 @@ export default function setup(pocket) {
     pocket.launcher({
         id: "usage",
         label: "Subscription usage",
-        detail: "Claude, ChatGPT, OpenCode Go, Grok, and Z.ai limits",
+        detail: "Claude, ChatGPT, OpenCode Go, Grok, Z.ai, and MiniMax limits",
         iconPath: BARS,
         keywords: [
             "anthropic",
@@ -379,6 +379,7 @@ export default function setup(pocket) {
             "xai",
             "zai",
             "glm",
+            "minimax",
             "quota",
             "limits",
             "usage",
