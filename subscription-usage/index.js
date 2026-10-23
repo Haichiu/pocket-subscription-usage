@@ -190,8 +190,7 @@ export default function setup(pocket) {
 
         return html`<div class=${`su-balance${balance.enough ? "" : " su-critical"}`}>
             <p class="su-balance-amount">
-                <span class="su-sr">Balance </span
-                >${money(balance.total, balance.currency)}
+                <span class="su-sr">Balance </span>${money(balance.total, balance.currency)}
             </p>
             <span class=${`su-flag${balance.enough ? "" : " su-critical"}`}>
                 ${balance.enough ? "Available" : "Not enough for calls"}
@@ -317,7 +316,7 @@ export default function setup(pocket) {
 
         if (!data) {
             return html`<div class="su" aria-busy="true">
-                <${Loader} label="Asking Claude, ChatGPT, OpenCode Go, and DeepSeek" />
+                <${Loader} label="Asking your plans" />
             </div>`;
         }
 
@@ -429,7 +428,7 @@ export default function setup(pocket) {
     pocket.launcher({
         id: "usage",
         label: "Subscription usage",
-        detail: "Claude, ChatGPT, OpenCode Go limits, and DeepSeek balance",
+        detail: "Plan limits and the DeepSeek balance",
         iconPath: BARS,
         keywords: [
             "anthropic",
@@ -438,6 +437,11 @@ export default function setup(pocket) {
             "chatgpt",
             "codex",
             "opencode",
+            "grok",
+            "xai",
+            "zai",
+            "glm",
+            "minimax",
             "deepseek",
             "balance",
             "credit",
