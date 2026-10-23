@@ -319,6 +319,31 @@
     font-weight: 500;
 }
 
+/* ─── A prepaid account: the money left, its state, and what makes it up ─── */
+
+.su-balance {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+    padding-block: calc(6px * var(--space-y));
+}
+
+.su-balance-amount {
+    color: var(--text);
+    font: 600 22px / 1.2 var(--mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.su-balance .su-flag:not(.su-critical) {
+    --su-tone: var(--ok);
+}
+
+.su-balance .su-meta {
+    flex-basis: 100%;
+    margin-top: 0;
+}
+
 /* ─── Notes, an empty plan, and a plan that could not be read ─── */
 
 .su-notes {

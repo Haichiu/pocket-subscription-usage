@@ -1,7 +1,7 @@
 /**
  * Subscription usage: a page on the rail with how much of your Claude, ChatGPT (Codex), OpenCode Go, Grok, Z.ai, and
- * MiniMax plans is used, and when each limit resets. The server asks each service with the sign-ins already on this machine, so
- * no key or token reaches the browser.
+ * MiniMax plans is used, and when each limit resets, plus the DeepSeek balance when Pi has a DeepSeek key. The server
+ * asks each service with the sign-ins already on this machine, so no key or token reaches the browser.
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { homedir } from "node:os";
@@ -24,8 +24,18 @@ interface Limit {
     binding?: boolean;
 }
 
+/** A prepaid account's balance: money left, not a share of a plan used. */
+interface Balance {
+    currency: string;
+    total: number;
+    granted: number;
+    toppedUp: number;
+    /** Whether the service says it can take paid calls now. */
+    enough: boolean;
+}
+
 type Report =
-    | { id: string; name: string; ok: true; limits: Limit[]; notes: string[] }
+    | { id: string; name: string; ok: true; limits: Limit[]; notes: string[]; balance?: Balance }
     | { id: string; name: string; ok: false; error: string };
 
 /** How long each service may take to answer. */
@@ -51,6 +61,13 @@ class Said extends Error {}
 
 /** A percent from a service: a finite number, else 0. */
 function percentOf(value: unknown): number {
+    const number = Number(value);
+
+    return Number.isFinite(number) ? Math.max(0, number) : 0;
+}
+
+/** Money from a service, which sends it as text: a finite number, else 0. */
+function amountOf(value: unknown): number {
     const number = Number(value);
 
     return Number.isFinite(number) ? Math.max(0, number) : 0;
@@ -860,6 +877,60 @@ export default function createSubscriptionUsage(_host: unknown, web: ExtensionWe
         }
     }
 
+    async function deepSeek(signal: AbortSignal): Promise<Report | undefined> {
+        const name = "DeepSeek";
+
+        try {
+            const key = (await signIn("deepseek", signal))?.key;
+
+            // It is a prepaid account, not a subscription: its card shows only when Pi can read the key.
+            if (key === undefined) {
+                return undefined;
+            }
+
+            const response = await fetch("https://api.deepseek.com/user/balance", {
+                headers: { authorization: `Bearer ${key}` },
+                redirect: "error",
+                signal,
+            });
+
+            if (!response.ok) {
+                throw answered(response.status);
+            }
+
+            const data = (await response.json()) as Record<string, any>;
+            const infos = (Array.isArray(data.balance_infos) ? data.balance_infos : []).filter(
+                (info: unknown): info is Record<string, any> =>
+                    info !== null && typeof info === "object" && !Array.isArray(info),
+            );
+            const main = infos.find((info) => info.currency === "CNY") ?? infos[0];
+
+            if (main === undefined) {
+                throw new Said("The answer named no balance.");
+            }
+
+            const total = amountOf(main.total_balance);
+
+            return {
+                id: "deepseek",
+                name,
+                ok: true,
+                limits: [],
+                notes: [],
+                balance: {
+                    currency: typeof main.currency === "string" ? main.currency : "",
+                    total,
+                    granted: amountOf(main.granted_balance),
+                    toppedUp: amountOf(main.topped_up_balance),
+                    enough:
+                        data.is_available === true || (data.is_available !== false && total > 0),
+                },
+            };
+        } catch (error) {
+            return { id: "deepseek", name, ok: false, error: failed(error) };
+        }
+    }
+
     /** Every service at once, each on its own: one that fails leaves the others' answers. */
     const read = async () => {
         const signal = AbortSignal.any([AbortSignal.timeout(TIMEOUT_MS), alive.signal]);
@@ -871,6 +942,7 @@ export default function createSubscriptionUsage(_host: unknown, web: ExtensionWe
                 grok(signal),
                 zai(signal),
                 miniMax(signal),
+                deepSeek(signal),
             ])
         )
             .filter((report): report is Report => report !== undefined)

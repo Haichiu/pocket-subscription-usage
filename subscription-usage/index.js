@@ -1,7 +1,7 @@
 // Subscription usage's browser module: a rail button (with the fullest limit on it once one passes 80%), a launcher
 // action, and a page set like the home screen's fastfetch: a "usage@pi-pocket" card, then each plan's limits as rows of
-// small squares (the home screen's color swatches) with how full each is and when it resets. The server module asks the
-// services; this only shows what it says.
+// small squares (the home screen's color swatches) with how full each is and when it resets, and a prepaid account's
+// balance (DeepSeek) as money left. The server module asks the services; this only shows what it says.
 
 export const pocketApi = 1;
 
@@ -76,6 +76,22 @@ function lit(percent) {
     const n = Math.max(1, Math.round(percent / (100 / CELLS)));
 
     return percent < 100 ? Math.min(n, CELLS - 1) : CELLS;
+}
+
+/** Money as the browser writes it, or its code and number when that code is not one it knows. */
+function money(value, currency) {
+    const amount = Number(value) || 0;
+
+    try {
+        return new Intl.NumberFormat(undefined, {
+            style: "currency",
+            currency: currency || "CNY",
+            currencyDisplay: "narrowSymbol",
+            minimumFractionDigits: 2,
+        }).format(amount);
+    } catch {
+        return `${currency} ${amount.toFixed(2)}`.trim();
+    }
 }
 
 /** What the card at the top says: the fullest limit, and the next reset, across the plans that answered. */
@@ -158,6 +174,31 @@ export default function setup(pocket) {
         </li>`;
     }
 
+    /** A prepaid account: the money left, whether the service will take calls, and what makes it up. */
+    function BalanceRow({ balance }) {
+        const granted = Number(balance.granted) || 0;
+        const toppedUp = Number(balance.toppedUp) || 0;
+        const parts = [];
+
+        if (granted > 0) {
+            parts.push(`Granted ${money(granted, balance.currency)}`);
+        }
+
+        if (toppedUp > 0) {
+            parts.push(`Topped up ${money(toppedUp, balance.currency)}`);
+        }
+
+        return html`<div class=${`su-balance${balance.enough ? "" : " su-critical"}`}>
+            <p class="su-balance-amount">
+                <span class="su-sr">Balance </span>${money(balance.total, balance.currency)}
+            </p>
+            <span class=${`su-flag${balance.enough ? "" : " su-critical"}`}>
+                ${balance.enough ? "Available" : "Not enough for calls"}
+            </span>
+            ${parts.length > 0 && html`<p class="su-meta">${parts.join(" · ")}</p>`}
+        </div>`;
+    }
+
     /** A plan's section: its limits and notes, or why it could not be read. */
     function Plan({ report, index }) {
         const head = `su-plan-${report.id}`;
@@ -169,24 +210,34 @@ export default function setup(pocket) {
                 <span class="su-rule" aria-hidden="true"></span>
                 ${
                     report.ok
-                        ? report.limits.length > 0 &&
-                          html`<span class="su-count">
-                              ${report.limits.length} limit${report.limits.length === 1 ? "" : "s"}
-                          </span>`
+                        ? report.limits.length > 0
+                            ? html`<span class="su-count">
+                                  ${report.limits.length} limit${report.limits.length === 1
+                                      ? ""
+                                      : "s"}
+                              </span>`
+                            : report.balance
+                              ? html`<span class="su-count">Balance</span>`
+                              : null
                         : html`<span class="su-flag su-failed">Unavailable</span>`
                 }
             </header>
             ${
                 report.ok
                     ? html`${
-                          report.limits.length === 0
-                              ? html`<p class="su-empty">No limits reported.</p>`
-                              : html`<ul class="su-limits" role="list">
+                          report.balance && html`<${BalanceRow} balance=${report.balance} />`
+                      }
+                      ${
+                          report.limits.length > 0
+                              ? html`<ul class="su-limits" role="list">
                                     ${report.limits.map(
                                         (limit, at) =>
                                             html`<${LimitRow} key=${at} limit=${limit} />`,
                                     )}
                                 </ul>`
+                              : report.balance
+                                ? null
+                                : html`<p class="su-empty">No limits reported.</p>`
                       }
                       ${
                           notes.length > 0 &&
@@ -273,6 +324,7 @@ export default function setup(pocket) {
         const stamp = read.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
         const iso = Number.isFinite(read.getTime()) ? read.toISOString() : undefined;
         const { top, next } = glance(data);
+        const wallet = (data.reports ?? []).find((report) => report.ok && report.balance);
 
         return html`<div class="su" aria-busy=${busy ? "true" : undefined}>
             <div class="su-fetch">
@@ -322,10 +374,20 @@ export default function setup(pocket) {
                                 </dd>
                             </div>`
                         }
+                        ${
+                            wallet &&
+                            html`<div class="su-row" style="--i:4">
+                                <dt>balance</dt>
+                                <dd>
+                                    <b>${money(wallet.balance.total, wallet.balance.currency)}</b>
+                                    <span class="su-quiet">${" "}· ${wallet.name}</span>
+                                </dd>
+                            </div>`
+                        }
                     </dl>
                     ${
                         top &&
-                        html`<div class="su-key" style="--i:4" aria-hidden="true">
+                        html`<div class="su-key" style="--i:5" aria-hidden="true">
                             <span class="su-swatch"></span>ok
                             <span class="su-swatch su-warning"></span>warning
                             <span class="su-swatch su-critical"></span>critical
@@ -366,7 +428,7 @@ export default function setup(pocket) {
     pocket.launcher({
         id: "usage",
         label: "Subscription usage",
-        detail: "Claude, ChatGPT, OpenCode Go, Grok, Z.ai, and MiniMax limits",
+        detail: "Plan limits and the DeepSeek balance",
         iconPath: BARS,
         keywords: [
             "anthropic",
@@ -380,6 +442,9 @@ export default function setup(pocket) {
             "zai",
             "glm",
             "minimax",
+            "deepseek",
+            "balance",
+            "credit",
             "quota",
             "limits",
             "usage",
