@@ -115,6 +115,16 @@
     color: var(--muted);
 }
 
+/* Words for screen readers only. */
+.su-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
 /* What the colors mean, as swatches like the home screen's. */
 .su-key {
     display: flex;
