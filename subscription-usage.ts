@@ -1,7 +1,7 @@
 /**
- * Subscription usage: a page on the rail with how much of your Claude, ChatGPT (Codex), and OpenCode Go plans is
- * used, and when each limit resets. The server asks each service with the sign-ins already on this machine, so no key
- * or token reaches the browser.
+ * Subscription usage: a page on the rail with how much of your Claude, ChatGPT (Codex), OpenCode Go, Grok, Z.ai, and
+ * MiniMax plans is used, and when each limit resets. The server asks each service with the sign-ins already on this machine, so
+ * no key or token reaches the browser.
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { homedir } from "node:os";
@@ -34,6 +34,17 @@ const TIMEOUT_MS = 15_000;
 const FRESH_MS = 60_000;
 /** Refresh asks the services again, but not more often than this. */
 const MIN_GAP_MS = 10_000;
+/** Grok's own billing, as the Grok CLI reads it: the plan's shared weekly pool. */
+const GROK_BILLING = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
+/** Grok CLI settings: the plan's name. */
+const GROK_SETTINGS = "https://cli-chat-proxy.grok.com/v1/settings";
+/** Z.ai's quota and subscriptions, as its own subscription page reads them. */
+const ZAI_QUOTA = "https://api.z.ai/api/monitor/usage/quota/limit";
+const ZAI_PLANS = "https://api.z.ai/api/biz/subscription/list";
+/** MiniMax's Coding Plan lanes, as its own Coding Plan page reads them. */
+const MINIMAX_REMAINS = "https://api.minimax.io/v1/api/openplatform/coding_plan/remains";
+/** Z.ai's units for a window's length, in minutes (5 is a month, named on its own). */
+const ZAI_UNIT_MINUTES: Record<number, number> = { 3: 60, 4: 1440, 6: 10_080 };
 
 /** Words this module wrote itself, safe to show. Anything else that goes wrong is told in fixed words. */
 class Said extends Error {}
@@ -56,6 +67,11 @@ function levelOf(percent: number, said?: unknown): Level {
     }
 
     return percent >= 90 ? "critical" : percent >= 75 ? "warning" : "ok";
+}
+
+/** A reset time from milliseconds since 1970, as Z.ai gives it. */
+function resetOfMs(value: unknown): { resetsAt?: string } {
+    return resetOf(typeof value === "number" ? value / 1000 : value);
 }
 
 /** A reset time as ISO text, from ISO text or seconds since 1970; none when it is not a time. */
@@ -126,6 +142,27 @@ function windowLabel(minutes: unknown): string {
 
     return minutes % 60 === 0 ? `${minutes / 60} hours` : `${minutes} minutes`;
 }
+
+/** A Z.ai window as people read it: unit 3 is hours, 4 days, 5 months, 6 weeks. None for a unit it does not know. */
+function zaiWindow(unit: unknown, number: unknown): string | undefined {
+    if (typeof unit !== "number" || typeof number !== "number" || !(number > 0)) {
+        return undefined;
+    }
+
+    if (unit === 5) {
+        return number === 1 ? "Month" : `${number} months`;
+    }
+
+    const minutes = ZAI_UNIT_MINUTES[unit];
+
+    return minutes === undefined ? undefined : windowLabel(minutes * number);
+}
+
+/** "GrokBuild" as "Grok Build". */
+const spaced = (name: string) => name.replace(/([a-z])([A-Z])/g, "$1 $2");
+
+/** "video" as "Video". */
+const capitalized = (name: string) => `${name.charAt(0).toUpperCase()}${name.slice(1)}`;
 
 /**
  * Ask Codex's own app server (`codex app-server`, JSON-RPC over stdio) for the account's limits. Codex reads and
@@ -293,15 +330,22 @@ export default function createSubscriptionUsage(_host: unknown, web: ExtensionWe
             throw error;
         }));
 
-    const credential = async (provider: string, signal: AbortSignal) => {
+    /** Pi's sign-in to a provider, and how it signed in ("OAuth" for a subscription), or none. */
+    const signIn = async (provider: string, signal: AbortSignal) => {
         const found = await (await models()).getAuth(provider, { signal });
         const key = found?.auth.apiKey;
 
-        if (typeof key !== "string" || key === "") {
+        return typeof key === "string" && key !== "" ? { key, source: found?.source } : undefined;
+    };
+
+    const credential = async (provider: string, signal: AbortSignal) => {
+        const found = await signIn(provider, signal);
+
+        if (found === undefined) {
             throw new Said("Pi is not signed in to it: sign in under Menu → Providers.");
         }
 
-        return key;
+        return found.key;
     };
 
     async function claude(signal: AbortSignal): Promise<Report> {
@@ -492,10 +536,346 @@ export default function createSubscriptionUsage(_host: unknown, web: ExtensionWe
         }
     }
 
+    /**
+     * Grok's shared weekly pool, from the SuperGrok or X Premium sign-in: the one the Grok CLI uses. Without it there is
+     * no plan to show (an xAI API key pays as it goes), so the page leaves Grok out.
+     */
+    async function grok(signal: AbortSignal): Promise<Report | undefined> {
+        const name = "Grok (xAI)";
+
+        try {
+            const found = await signIn("xai", signal);
+
+            if (found?.source !== "OAuth") {
+                return undefined;
+            }
+
+            const headers = {
+                authorization: `Bearer ${found.key}`,
+                "x-xai-token-auth": "xai-grok-cli",
+                accept: "application/json",
+            };
+            // The plan's name is a nice to have: when it cannot be read, the pool still shows.
+            const tier = fetch(GROK_SETTINGS, { headers, redirect: "error", signal })
+                .then((response) => (response.ok ? response.json() : undefined))
+                .then(
+                    (settings: Record<string, any> | undefined) =>
+                        settings?.subscription_tier_display,
+                )
+                .catch(() => undefined);
+            const response = await fetch(GROK_BILLING, { headers, redirect: "error", signal });
+
+            if (response.status === 412) {
+                throw new Said("Grok keeps no personal quota for a team account.");
+            }
+
+            if (!response.ok) {
+                throw answered(response.status);
+            }
+
+            // Grok answers in proto JSON, which leaves out every field that is 0: a missing percent is 0%.
+            const config =
+                ((await response.json()) as { config?: Record<string, any> }).config ?? {};
+            const period = config.currentPeriod ?? {};
+            const start = Date.parse(period.start);
+            const end = Date.parse(period.end);
+            const limits: Limit[] = [];
+            const notes: string[] = [];
+
+            if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+                const percent = percentOf(config.creditUsagePercent);
+
+                limits.push({
+                    label: `${windowLabel(Math.round((end - start) / 60_000))}, shared pool`,
+                    percent,
+                    ...resetOf(period.end),
+                    level: levelOf(percent),
+                });
+            }
+
+            const plan = await tier;
+
+            notes.push(
+                typeof plan === "string" && plan.trim() !== ""
+                    ? `${plan.trim()} plan, from Pi's xAI sign-in.`
+                    : "From Pi's xAI sign-in.",
+            );
+
+            const products = (Array.isArray(config.productUsage) ? config.productUsage : [])
+                .filter(
+                    (each: unknown): each is Record<string, any> =>
+                        each !== null &&
+                        typeof each === "object" &&
+                        typeof (each as any).product === "string",
+                )
+                .map(
+                    (each) =>
+                        `${spaced(each.product)} ${Math.round(percentOf(each.usagePercent))}%`,
+                );
+
+            if (products.length > 0) {
+                notes.push(`Of the pool: ${products.join(", ")}.`);
+            }
+
+            const cap = percentOf(config.onDemandCap?.val);
+
+            notes.push(cap > 0 ? `Pay as you go: up to ${cap} credits.` : "Pay as you go is off.");
+
+            return { id: "xai", name, ok: true, limits, notes };
+        } catch (error) {
+            return { id: "xai", name, ok: false, error: failed(error) };
+        }
+    }
+
+    /** Z.ai's GLM Coding Plan, from Pi's Z.ai key. Without one, the page leaves Z.ai out. */
+    async function zai(signal: AbortSignal): Promise<Report | undefined> {
+        const name = "Z.ai (GLM Coding Plan)";
+
+        try {
+            const found = await signIn("zai", signal);
+
+            if (found === undefined) {
+                return undefined;
+            }
+
+            const headers = { authorization: `Bearer ${found.key}`, accept: "application/json" };
+            // The plan's name is a nice to have: when it cannot be read, the limits still show.
+            const product = fetch(ZAI_PLANS, { headers, redirect: "error", signal })
+                .then((response) => (response.ok ? response.json() : undefined))
+                .then((plans: { data?: unknown } | undefined) => {
+                    const list = Array.isArray(plans?.data) ? plans.data : [];
+                    const plan =
+                        list.find(
+                            (each: any) =>
+                                each?.status === "VALID" && each?.inCurrentPeriod === true,
+                        ) ?? list[0];
+
+                    return plan?.productName;
+                })
+                .catch(() => undefined);
+            const response = await fetch(ZAI_QUOTA, { headers, redirect: "error", signal });
+
+            if (!response.ok) {
+                throw answered(response.status);
+            }
+
+            const body = (await response.json()) as Record<string, any>;
+
+            // A key with no coding plan gets 200 with success false, and a message that names the plan.
+            if (body.success === false) {
+                throw new Said(
+                    String(body.msg ?? "")
+                        .toLowerCase()
+                        .includes("coding plan")
+                        ? "This key has no GLM Coding Plan: subscribe at z.ai/subscribe."
+                        : "It refused to read the quota.",
+                );
+            }
+
+            const data = body.data ?? body;
+            const entries = (Array.isArray(data.limits) ? data.limits : []).filter(
+                (each: unknown): each is Record<string, any> =>
+                    each !== null && typeof each === "object",
+            );
+            const limits: Limit[] = [];
+            const counts: Limit[] = [];
+            const notes: string[] = [];
+
+            for (const entry of entries) {
+                const type = entry.type ?? entry.name;
+                const window = zaiWindow(entry.unit, entry.number);
+
+                if (window === undefined) {
+                    continue;
+                }
+
+                if (type === "TOKENS_LIMIT" || type === "CREDIT_LIMIT") {
+                    const percent = percentOf(entry.percentage);
+
+                    limits.push({
+                        label: window,
+                        percent,
+                        ...resetOfMs(entry.nextResetTime),
+                        level: levelOf(percent),
+                    });
+                } else if (type === "TIME_LIMIT") {
+                    // Web search, web reader, and Zread calls: a count, not tokens.
+                    const used = percentOf(entry.currentValue);
+                    const total = percentOf(entry.usage);
+                    const percent =
+                        entry.percentage === undefined && total > 0
+                            ? (used / total) * 100
+                            : percentOf(entry.percentage);
+
+                    counts.push({
+                        label: `Web tools, ${used}/${total}`,
+                        percent,
+                        ...resetOfMs(entry.nextResetTime),
+                        level: levelOf(percent),
+                    });
+                    notes.push(
+                        `Web tools: web search, web reader, and Zread calls, for each ${window.toLowerCase()}.`,
+                    );
+                }
+            }
+
+            const plan = await product;
+
+            return {
+                id: "zai",
+                name,
+                ok: true,
+                // The token windows first: they are what holds the work back.
+                limits: [...limits, ...counts],
+                notes: [
+                    typeof plan === "string" && plan.trim() !== ""
+                        ? `${plan.trim()}, from Pi's Z.ai key.`
+                        : "From Pi's Z.ai key.",
+                    ...notes,
+                ],
+            };
+        } catch (error) {
+            return { id: "zai", name, ok: false, error: failed(error) };
+        }
+    }
+
+    /**
+     * MiniMax's Coding Plan, from Pi's MiniMax key: text ("general") and each other lane, in its short window and its
+     * week. A standard key (`sk-api-`) pays as it goes, and has no plan: then, and without a key, the page leaves
+     * MiniMax out.
+     */
+    async function miniMax(signal: AbortSignal): Promise<Report | undefined> {
+        const name = "MiniMax (Coding Plan)";
+
+        try {
+            const found = await signIn("minimax", signal);
+
+            if (found === undefined || found.key.startsWith("sk-api-")) {
+                return undefined;
+            }
+
+            const response = await fetch(MINIMAX_REMAINS, {
+                headers: { authorization: `Bearer ${found.key}`, accept: "application/json" },
+                redirect: "error",
+                signal,
+            });
+
+            if (!response.ok) {
+                throw answered(response.status);
+            }
+
+            const body = (await response.json()) as Record<string, any>;
+            const code = body.base_resp?.status_code;
+
+            if (code !== 0) {
+                throw new Said(
+                    code === 1004
+                        ? "It refused the key: sign in again in Menu → Providers."
+                        : `It refused to read the plan (code ${Number(code) || "unknown"}).`,
+                );
+            }
+
+            const lanes = (Array.isArray(body.model_remains) ? body.model_remains : []).filter(
+                (each: unknown): each is Record<string, any> =>
+                    each !== null && typeof each === "object",
+            );
+            const limits: Limit[] = [];
+            const others: Limit[] = [];
+            const notes = ["From Pi's MiniMax key."];
+
+            for (const lane of lanes) {
+                const text = lane.model_name === "general";
+                const prefix = text ? "" : `${capitalized(String(lane.model_name ?? "other"))}, `;
+
+                for (const window of [
+                    {
+                        start: lane.start_time,
+                        end: lane.end_time,
+                        total: lane.current_interval_total_count,
+                        remaining: lane.current_interval_usage_count,
+                        left: lane.current_interval_remaining_percent,
+                        status: lane.current_interval_status,
+                    },
+                    {
+                        start: lane.weekly_start_time,
+                        end: lane.weekly_end_time,
+                        total: lane.current_weekly_total_count,
+                        remaining: lane.current_weekly_usage_count,
+                        left: lane.current_weekly_remaining_percent,
+                        status: lane.current_weekly_status,
+                    },
+                ]) {
+                    const minutes = Math.round(
+                        (Number(window.end) - Number(window.start)) / 60_000,
+                    );
+
+                    if (!(minutes > 0)) {
+                        continue;
+                    }
+
+                    const label = windowLabel(minutes);
+
+                    // Status 3 with nothing in it: a lane the plan leaves out, or (for text in a week) no limit at all.
+                    if (
+                        window.status === 3 &&
+                        !(Number(window.total) > 0) &&
+                        Number(window.left) >= 100
+                    ) {
+                        if (text && label === "Week") {
+                            notes.push("Text has no weekly limit.");
+                        }
+
+                        continue;
+                    }
+
+                    // `usage_count` holds what is left, not what is used: the percent left is the surer field.
+                    const used =
+                        typeof window.left === "number"
+                            ? 100 - window.left
+                            : Number(window.total) > 0
+                              ? ((Number(window.total) - Number(window.remaining)) /
+                                    Number(window.total)) *
+                                100
+                              : undefined;
+
+                    if (used === undefined || !Number.isFinite(used)) {
+                        continue;
+                    }
+
+                    const percent = Math.min(100, percentOf(used));
+
+                    (text ? limits : others).push({
+                        label: prefix + label,
+                        percent,
+                        ...resetOfMs(Number(window.end)),
+                        level: levelOf(percent),
+                    });
+                }
+            }
+
+            // Text first: it is what the work runs on.
+            return { id: "minimax", name, ok: true, limits: [...limits, ...others], notes };
+        } catch (error) {
+            return { id: "minimax", name, ok: false, error: failed(error) };
+        }
+    }
+
     /** Every service at once, each on its own: one that fails leaves the others' answers. */
     const read = async () => {
         const signal = AbortSignal.any([AbortSignal.timeout(TIMEOUT_MS), alive.signal]);
-        const reports = await Promise.all([claude(signal), chatGpt(signal), openCodeGo(signal)]);
+        const reports = (
+            await Promise.all([
+                claude(signal),
+                chatGpt(signal),
+                openCodeGo(signal),
+                grok(signal),
+                zai(signal),
+                miniMax(signal),
+            ])
+        )
+            .filter((report): report is Report => report !== undefined)
+            // The plans that answered first, each group in its own order: what failed goes to the end.
+            .sort((a, b) => Number(b.ok) - Number(a.ok));
 
         last = { at: Date.now(), reports };
 
