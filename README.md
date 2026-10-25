@@ -22,8 +22,23 @@ You can also copy these files into the extensions folder of Pi Pocket (`~/.pi-po
     - MiniMax: with Pi's MiniMax key, for a Coding Plan (`sk-cp-` keys). It reads text and each other lane (video, say), in its short window and its week. A standard key (`sk-api-`) pays as it goes and has no plan, so the page leaves MiniMax out, as it does without a key.
     - DeepSeek: with the API key that Pi has, it asks [`GET /user/balance`](https://api-docs.deepseek.com/api/get-user-balance) for the money left, whether the key can take calls, and what makes up the balance (granted and topped up). Its card shows only when Pi has a DeepSeek key, so an account that does not use DeepSeek sees no card.
 - **In the browser:** it adds a page and a rail button, for the owner only. The page shows the usage, and the DeepSeek balance. No key or token goes to the browser.
+- **In chat:** it adds the command `/usage-plans`, for the owner only. Type it in any session's message box to post the same usage as a card in that session: each plan, each limit with a gauge, how full it is, and how long until it resets. The card is plain text, sized for a phone. Everyone in the session can read it, and Pi never gets it.
 
-It runs no tools and changes nothing in your sessions.
+```
+Claude (Anthropic) ───────────────────
+   5h session  ■■■□□□□□□□  27%     49m
+▸  Week, all   ■■■□□□□□□□  32%  4d 18h
+   Week, Fable □□□□□□□□□□   0%  4d 18h
+OpenCode Go ──────────────────────────
+   5h, rolling ■□□□□□□□□□   2%  3h 32m
+   Week        ■■□□□□□□□□  17%      1d
+──────────────────────────────────────
+▸ in force · read Oct 24, 6:51 PM CDT
+```
+
+In the margin, `▸` marks the limit in force, `!` a warning, and `!!` a critical level. A Pi Pocket command needs a `-` in its name, so it is `/usage-plans`, not `/usage`; typing `/usage` suggests it.
+
+It runs no tools and changes nothing in your sessions, other than the cards that you post.
 
 ## License
 
