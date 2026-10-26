@@ -44,7 +44,8 @@ type OkReport = Extract<Report, { ok: true }>;
 
 /**
  * The plan report that a Pi model provider belongs to, and the name that fits the status line. The report's credentials
- * are Pi's sign-in to the provider: a regional or API-key variant with another sign-in shows no quota.
+ * are Pi's sign-in to the provider (Codex's are the Codex CLI's own): a regional or API-key variant with another
+ * sign-in shows no quota.
  */
 const PROVIDER_REPORTS: Record<string, { report: string; label: string }> = {
     anthropic: { report: "anthropic", label: "Claude" },
