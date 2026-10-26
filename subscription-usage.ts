@@ -8,8 +8,9 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-// A type import is gone when the module runs: only the type checker reads this path.
-import type { ExtensionWeb } from "/mnt/games/Development/pi-pocket/src/server/host.ts";
+// A type import is gone when the module runs: only the type checker reads this path. Pi Pocket links the public types
+// beside the drop-in, as `_pocket.d.ts`.
+import type { Web } from "./_pocket.d.ts";
 
 /** The version of Pi Pocket's extension API this module is written for. */
 export const pocketApi = 1;
@@ -39,12 +40,30 @@ type Report =
     | { id: string; name: string; ok: true; limits: Limit[]; notes: string[]; balance?: Balance }
     | { id: string; name: string; ok: false; error: string };
 
+type OkReport = Extract<Report, { ok: true }>;
+
+/**
+ * The plan report that a Pi model provider belongs to, and the name that fits the status line. The report's credentials
+ * are Pi's sign-in to the provider: a regional or API-key variant with another sign-in shows no quota.
+ */
+const PROVIDER_REPORTS: Record<string, { report: string; label: string }> = {
+    anthropic: { report: "anthropic", label: "Claude" },
+    "openai-codex": { report: "openai", label: "Codex" },
+    "opencode-go": { report: "opencode-go", label: "OpenCode Go" },
+    xai: { report: "xai", label: "Grok" },
+    zai: { report: "zai", label: "Z.ai" },
+    minimax: { report: "minimax", label: "MiniMax" },
+    deepseek: { report: "deepseek", label: "DeepSeek" },
+};
+
 /** How long each service may take to answer. */
 const TIMEOUT_MS = 15_000;
 /** An answer is kept this long: tabs that look at the same time share one call to each service. */
 const FRESH_MS = 60_000;
 /** Refresh asks the services again, but not more often than this. */
 const MIN_GAP_MS = 10_000;
+/** The status line accepts a reading up to this age: a session's provider quota is not worth asking the services often. */
+const STATUS_MAX_AGE_MS = 5 * 60_000;
 /** Grok's own billing, as the Grok CLI reads it: the plan's shared weekly pool. */
 const GROK_BILLING = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
 /** Grok CLI settings: the plan's name. */
@@ -468,7 +487,7 @@ function askCodex(signal: AbortSignal, children: Set<ChildProcess>): Promise<Rec
     });
 }
 
-export default function createSubscriptionUsage(_host: unknown, web: ExtensionWeb) {
+export default function createSubscriptionUsage(_host: unknown, web: Web) {
     // Pi's own models and sign-ins: `getAuth` renews an expiring subscription token under Pi's lock, as Pi does.
     let runtime: Promise<ModelRuntime> | undefined;
     let last: { at: number; reports: Report[] } | undefined;
@@ -1110,11 +1129,14 @@ export default function createSubscriptionUsage(_host: unknown, web: ExtensionWe
         return last;
     };
 
-    /** The last answer while it is fresh, else a new read: one at a time, shared by the page and the command. */
-    const usage = (fresh: boolean) => {
+    /**
+     * The last answer while it is fresh, else a new read: one at a time, shared by the page, the command, and the
+     * status line. `maxAge` lets the status line accept an older reading, so it asks the services less often.
+     */
+    const usage = (fresh: boolean, maxAge = FRESH_MS) => {
         const age = last === undefined ? Infinity : Date.now() - last.at;
 
-        if (last !== undefined && (age < MIN_GAP_MS || (!fresh && age < FRESH_MS))) {
+        if (last !== undefined && (age < MIN_GAP_MS || (!fresh && age < maxAge))) {
             return Promise.resolve(last);
         }
 
@@ -1127,6 +1149,43 @@ export default function createSubscriptionUsage(_host: unknown, web: ExtensionWe
 
     // GET /api/x/subscription-usage/usage, and ?fresh=1 to ask again now. The owner's alone (the default).
     web.route("GET", "usage", ({ query }) => usage(query.get("fresh") === "1"));
+
+    // GET /api/x/subscription-usage/quota/:source: the quota of the plan that the model in that session belongs to.
+    // The model comes from the bound session, never from the browser. A reading up to 5 minutes old is enough, so a
+    // status line that checks it often asks the services no more than every 5 minutes; ?fresh=1 reads again (the server
+    // still keeps MIN_GAP_MS between reads). A provider with no report, or a report that failed, gives `report: null`.
+    if (typeof web.conversationRoute === "function") {
+        web.conversationRoute(
+            "GET",
+            "quota/:source",
+            async ({ conversation, query }) => {
+                const model = conversation.model;
+                const mapped = model === undefined ? undefined : PROVIDER_REPORTS[model.provider];
+
+                if (mapped === undefined) {
+                    return {
+                        at: last?.at ?? null,
+                        model: model ?? null,
+                        label: null,
+                        report: null,
+                    };
+                }
+
+                const data = await usage(query.get("fresh") === "1", STATUS_MAX_AGE_MS);
+                const report = data.reports.find(
+                    (each): each is OkReport => each.id === mapped.report && each.ok,
+                );
+
+                return {
+                    at: data.at,
+                    model: model ?? null,
+                    label: mapped.label,
+                    report: report ?? null,
+                };
+            },
+            { conversation: "source" },
+        );
+    }
 
     // /usage-plans: the same answer as a card in the session. The owner's alone, as the page is: it reads their
     // sign-ins. The card shows to everyone in the session, as each command's card does.
