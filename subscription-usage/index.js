@@ -180,7 +180,8 @@ function quotaOf(next) {
     if (report.balance) {
         const amount = money(report.balance.total, report.balance.currency);
 
-        return { text: `${label} ${amount}`, short: amount, title };
+        // A balance has no level: clear a tone left from another provider's limit.
+        return { text: `${label} ${amount}`, short: amount, title, tone: undefined };
     }
 
     const limit = tightest(report.limits);
@@ -624,7 +625,8 @@ export default function setup(pocket) {
                     return;
                 }
 
-                const key = next.model ? `${next.model.provider}/${next.model.modelId}` : null;
+                // Only the provider picks the report: another model of the same provider needs no fresh read.
+                const key = next.model ? next.model.provider : null;
                 const changed = key !== null && shown !== null && key !== shown;
 
                 shown = key;
