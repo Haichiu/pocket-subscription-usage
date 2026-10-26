@@ -1,7 +1,8 @@
 // Subscription usage's browser module: a rail button (with the fullest limit on it once one passes 80%), a launcher
-// action, and a page set like the home screen's fastfetch: a "usage@pi-pocket" card, then each plan's limits as rows of
+// action, a page set like the home screen's fastfetch: a "usage@pi-pocket" card, then each plan's limits as rows of
 // small squares (the home screen's color swatches) with how full each is and when it resets, and a prepaid account's
-// balance (DeepSeek) as money left. The server module asks the services; this only shows what it says.
+// balance (DeepSeek) as money left. It also adds a status line item with the quota of the current model's provider.
+// The server module asks the services; this only shows what it says.
 
 export const pocketApi = 1;
 
@@ -12,6 +13,8 @@ const ALERT = "M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18M12 7.5v5.5M12 16.5v.01";
 /** How often the page reads again while it shows, and the rail's badge in the background. */
 const PAGE_EVERY_MS = 60_000;
 const BADGE_EVERY_MS = 5 * 60_000;
+/** How often the status item checks the session's model. The check reads the server's cache, never a service. */
+const QUOTA_EVERY_MS = 30_000;
 /** A reset further away than this shows its date, not only its weekday. */
 const NEAR_MS = 6 * 86_400_000;
 /** The words for a level that needs a look, shown in the limit's line of details. An "ok" level has none. */
@@ -92,6 +95,118 @@ function money(value, currency) {
     } catch {
         return `${currency} ${amount.toFixed(2)}`.trim();
     }
+}
+
+/** How much of a limit is left, in percent, from how much is used. */
+const leftOf = (percent) => Math.max(0, Math.min(100, Math.round(100 - (Number(percent) || 0))));
+
+/** The limit that holds you back now, or the tightest one: the one with the least left. */
+function tightest(limits) {
+    let top;
+
+    for (const limit of limits) {
+        if (top === undefined || (Number(limit.percent) || 0) > (Number(top.percent) || 0)) {
+            top = limit;
+        }
+    }
+
+    return limits.find((limit) => limit.binding) ?? top;
+}
+
+/** When the reading was taken, for the item's tooltip. */
+function readTime(at) {
+    if (typeof at !== "number") {
+        return "";
+    }
+
+    const read = new Date(at);
+
+    return Number.isFinite(read.getTime())
+        ? read.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+        : "";
+}
+
+/** The item's tooltip: every limit of the plan, with what is left and when it resets. */
+function quotaTitle(report, label, at) {
+    const lines = [report.name === label ? label : `${label} · ${report.name}`];
+
+    if (report.balance) {
+        const { total, currency, enough } = report.balance;
+
+        lines.push(
+            `${money(total, currency)} left · ${enough ? "available" : "not enough for calls"}`,
+        );
+    }
+
+    for (const limit of report.limits) {
+        const reset = Date.parse(limit.resetsAt ?? "");
+        const parts = [`${leftOf(limit.percent)}% left`];
+
+        if (limit.binding) {
+            parts.push("in force");
+        }
+
+        if (LEVEL_WORDS[limit.level]) {
+            parts.push(LEVEL_WORDS[limit.level]);
+        }
+
+        if (Number.isFinite(reset) && reset > Date.now()) {
+            parts.push(`resets ${untilThen(reset)}`);
+        }
+
+        lines.push(`${limit.label}: ${parts.join(" · ")}`);
+    }
+
+    const read = readTime(at);
+
+    if (read !== "") {
+        lines.push(`Read ${read}`);
+    }
+
+    return lines.join("\n");
+}
+
+/** What the status item says for a provider's report, or null when there is nothing to show. */
+function quotaOf(next) {
+    const report = next?.report;
+
+    if (!report || report.ok !== true) {
+        return null;
+    }
+
+    const label = typeof next.label === "string" && next.label !== "" ? next.label : report.name;
+    const title = quotaTitle(report, label, next.at);
+
+    if (report.balance) {
+        const amount = money(report.balance.total, report.balance.currency);
+
+        return { text: `${label} ${amount}`, short: amount, title };
+    }
+
+    const limit = tightest(report.limits);
+
+    if (limit === undefined) {
+        return null;
+    }
+
+    const left = leftOf(limit.percent);
+    const reset = Date.parse(limit.resetsAt ?? "");
+    const resets =
+        Number.isFinite(reset) && reset > Date.now()
+            ? ` · ${untilThen(reset).replace(/^in /, "")}`
+            : "";
+
+    return {
+        text: `${label} ${left}% left${resets}`,
+        short: `${left}%`,
+        title,
+        tone:
+            limit.level === "critical"
+                ? "error"
+                : limit.level === "warning"
+                  ? "warn"
+                  : undefined,
+    };
 }
 
 /** What the card at the top says: the fullest limit, and the next reset, across the plans that answered. */
@@ -451,6 +566,120 @@ export default function setup(pocket) {
         ],
         page: "usage",
     });
+
+    // The status line's quota: the plan that the model in the open session belongs to. It is experimental in Pi Pocket
+    // 0.19, so an older app gets no item. The server reads the model from the session and keeps a reading up to 5
+    // minutes, so this check costs no call to a service; when the model's provider changes, it asks for a fresh one.
+    if (typeof pocket.status === "function") {
+        let item = null;
+        let session = null;
+        let shown = null;
+        let generation = 0;
+        let stopped = false;
+        const stop = new AbortController();
+
+        const hide = () => {
+            item?.remove();
+            item = null;
+        };
+
+        const show = (next) => {
+            const quota = quotaOf(next);
+
+            if (quota === null) {
+                hide();
+                return;
+            }
+
+            if (item === null) {
+                item = pocket.status({
+                    id: "quota",
+                    label: "Model quota",
+                    text: quota.text,
+                    short: quota.short,
+                    title: quota.title,
+                    tone: quota.tone,
+                });
+            } else {
+                item.update(quota);
+            }
+        };
+
+        const read = async (fresh) => {
+            if (session === null || stopped) {
+                return;
+            }
+
+            const id = session;
+            const turn = ++generation;
+
+            try {
+                const next = await pocket.api(
+                    `quota/${id}${fresh ? "?fresh=1" : ""}`,
+                    undefined,
+                    { signal: stop.signal },
+                );
+
+                if (stopped || id !== session || turn !== generation) {
+                    return;
+                }
+
+                const key = next.model ? `${next.model.provider}/${next.model.modelId}` : null;
+                const changed = key !== null && shown !== null && key !== shown;
+
+                shown = key;
+                show(next);
+
+                // The session's provider changed: read the services now instead of waiting for the 5 minutes to pass.
+                // The server still keeps 10 s between reads, and this one is used only if it is the latest.
+                if (changed && !fresh) {
+                    void read(true);
+                }
+            } catch {
+                if (!stopped && id === session && turn === generation) {
+                    hide();
+                }
+            }
+        };
+
+        const switchTo = (id) => {
+            generation++;
+            session = id;
+            shown = null;
+            hide();
+
+            if (id !== null) {
+                void read(false);
+            }
+        };
+
+        let stopConversation = () => {};
+
+        if (typeof pocket.onConversation === "function") {
+            stopConversation = pocket.onConversation(switchTo);
+        } else {
+            switchTo(pocket.conversationId());
+        }
+
+        const timer = setInterval(() => {
+            const id = pocket.conversationId();
+
+            if (id !== session) {
+                switchTo(id);
+            } else {
+                void read(false);
+            }
+        }, QUOTA_EVERY_MS);
+
+        pocket.onDispose(() => {
+            stopped = true;
+            generation++;
+            clearInterval(timer);
+            stopConversation();
+            stop.abort();
+            hide();
+        });
+    }
 
     // A reading in the background for the badge, while this tab is open; the server keeps answers a minute.
     const check = () =>
