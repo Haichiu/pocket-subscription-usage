@@ -113,6 +113,30 @@ function tightest(limits) {
     return limits.find((limit) => limit.binding) ?? top;
 }
 
+/** Weekly limits at or below this much left take the status line over from the 5-hour window. */
+const WEEK_LOW = 20;
+const FIVE_HOUR = /\b5[- ]hours?\b/i;
+const WEEKLY = /week/i;
+
+/**
+ * The limit the status line shows: the 5-hour window, unless a weekly limit is nearly used up (WEEK_LOW % left or less),
+ * then the tightest one. A plan with no 5-hour window shows its tightest limit. `tag` names the window in the short form.
+ */
+function statusLimit(limits) {
+    const five = limits.filter((each) => FIVE_HOUR.test(each.label));
+    const weeksLow = limits.some(
+        (each) => WEEKLY.test(each.label) && leftOf(each.percent) <= WEEK_LOW,
+    );
+
+    if (five.length > 0 && !weeksLow) {
+        return { limit: tightest(five), tag: "5h" };
+    }
+
+    const limit = tightest(limits);
+
+    return { limit, tag: limit && WEEKLY.test(limit.label) ? "wk" : "" };
+}
+
 /** When the reading was taken, for the item's tooltip. */
 function readTime(at) {
     if (typeof at !== "number") {
@@ -184,7 +208,7 @@ function quotaOf(next) {
         return { text: `${label} ${amount}`, short: amount, title, tone: undefined };
     }
 
-    const limit = tightest(report.limits);
+    const { limit, tag } = statusLimit(report.limits);
 
     if (limit === undefined) {
         return null;
@@ -198,8 +222,8 @@ function quotaOf(next) {
             : "";
 
     return {
-        text: `${label} ${left}% left${resets}`,
-        short: `${left}%`,
+        text: `${label}${tag ? ` ${tag}` : ""} ${left}% left${resets}`,
+        short: `${tag ? `${tag} ` : ""}${left}%`,
         title,
         tone:
             limit.level === "critical"
